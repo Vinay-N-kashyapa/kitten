@@ -10,7 +10,6 @@ import onnxruntime as ort
 
 app = FastAPI()
 
-# Enable CORS so your Firebase frontend can call this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,38 +18,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Renamed to model_nano_v3.onnx to force a fresh download and bypass Render's corrupt build cache
-MODEL_PATH = "model_nano_v3.onnx"
-# FIXED: Using '=' instead of space in download=true
+MODEL_PATH = "model_nano_int8.onnx"
+# Correct LFS download link
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
-if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
-    print("Downloading KittenTTS model (v3)...", flush=True)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
-    
-    # Safety Check: If the download returned an HTML page (Hugging Face error), block it
-    if b"<!doctype html>" in r.content[:500].lower() or b"<html>" in r.content[:500].lower():
-        raise RuntimeError("Error: Downloaded an HTML page instead of the model. Check the download URL.")
-        
+if not os.path.exists(MODEL_PATH):
+    print("Downloading KittenTTS model...")
+    r = requests.get(MODEL_URL, allow_redirects=True)
     with open(MODEL_PATH, 'wb') as f:
         f.write(r.content)
-    print(f"Model downloaded. Size: {os.path.getsize(MODEL_PATH)} bytes", flush=True)
+    print("Model downloaded successfully.")
 
-# Optimize ONNX memory limit for Render's 512MB RAM free plan
-session_options = ort.SessionOptions()
-session_options.intra_op_num_threads = 1
-session_options.inter_op_num_threads = 1
-session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+# Load ONNX session
+session = ort.InferenceSession(MODEL_PATH, providers=['CPUExecutionProvider'])
+print("ONNX model loaded successfully.")
 
-session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
-print("ONNX model loaded successfully.", flush=True)
-
+# 🎙️ All 13 distinct voice mappings (2 Mentors + 4 Teachers + 7 Interviewers)
 VOICE_MAP = {
-    "vikram": 0, "shalini": 1, "aditya": 2, "neha": 3,
-    "rajesh": 4, "sneha": 5, "abhijit": 6, "priya": 1, "anish": 2
+    # 7 Interviewers
+    "vikram": 0, 
+    "shalini": 1, 
+    "aditya": 2, 
+    "neha": 3, 
+    "rajesh": 4, 
+    "sneha": 5, 
+    "abhijit": 6, 
+    
+    # 2 Mentors
+    "priya": 7, 
+    "anish": 0, 
+    
+    # 4 Teachers
+    "kashyap": 1, 
+    "karthic": 2, 
+    "maya": 3, 
+    "divya": 4
 }
 
 class TTSRequest(BaseModel):
