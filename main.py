@@ -19,15 +19,18 @@ app.add_middleware(
 )
 
 MODEL_PATH = "model_nano_int8.onnx"
-# Added ?download=true to download the actual raw binary bytes
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
-if not os.path.exists(MODEL_PATH):
+# Download the model with browser User-Agent headers
+if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
     print("Downloading KittenTTS model...")
-    r = requests.get(MODEL_URL, allow_redirects=True)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
     with open(MODEL_PATH, 'wb') as f:
         f.write(r.content)
-    print("Model downloaded successfully.")
+    print(f"Model downloaded. Size: {os.path.getsize(MODEL_PATH)} bytes")
 
 # Optimize ONNX memory limit for Render's 512MB RAM
 session_options = ort.SessionOptions()
