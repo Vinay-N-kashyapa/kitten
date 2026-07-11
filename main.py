@@ -18,19 +18,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Renamed to model_nano_v2.onnx to bypass Render's corrupt build cache
-MODEL_PATH = "model_nano_v2.onnx"
+# Renamed to model_nano_v3.onnx to force a fresh download
+MODEL_PATH = "model_nano_v3.onnx"
+# FIXED: Using '=' instead of space
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
 if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
-    print("Downloading KittenTTS model (v2)...")
+    print("Downloading KittenTTS model (v3)...", flush=True)
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
+    
+    # Safety Check: If the file is HTML, it means Hugging Face blocked us or returned an error page
+    if b"<!doctype html>" in r.content[:500].lower() or b"<html>" in r.content[:500].lower():
+        raise RuntimeError("Error: Downloaded an HTML page instead of the model. Check the download URL.")
+        
     with open(MODEL_PATH, 'wb') as f:
         f.write(r.content)
-    print(f"Model downloaded. Size: {os.path.getsize(MODEL_PATH)} bytes")
+    print(f"Model downloaded. Size: {os.path.getsize(MODEL_PATH)} bytes", flush=True)
 
 # Optimize ONNX memory limit for Render's 512MB RAM
 session_options = ort.SessionOptions()
@@ -39,7 +45,7 @@ session_options.inter_op_num_threads = 1
 session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
 session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
-print("ONNX model loaded successfully.")
+print("ONNX model loaded successfully.", flush=True)
 
 VOICE_MAP = {
     "vikram": 0, "shalini": 1, "aditya": 2, "neha": 3,
