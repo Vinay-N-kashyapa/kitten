@@ -18,7 +18,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Renamed to model_nano_final.onnx to force a fresh download
 MODEL_PATH = "model_nano_final.onnx"
+# Correct LFS download link
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
 def download_model():
@@ -64,10 +66,26 @@ except Exception as err:
     session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
     print("ONNX model loaded successfully on retry.", flush=True)
 
+# 🎙️ All 13 distinct voice mappings (2 Mentors + 4 Teachers + 7 Interviewers)
 VOICE_MAP = {
-    "vikram": 0, "shalini": 1, "aditya": 2, "neha": 3,
-    "rajesh": 4, "sneha": 5, "abhijit": 6, "priya": 7, "anish": 0,
-    "kashyap": 1, "karthic": 2, "maya": 3, "divya": 4
+    # 7 Interviewers
+    "vikram": 0, 
+    "shalini": 1, 
+    "aditya": 2, 
+    "neha": 3, 
+    "rajesh": 4, 
+    "sneha": 5, 
+    "abhijit": 6, 
+    
+    # 2 Mentors
+    "priya": 7, 
+    "anish": 0, 
+    
+    # 4 Teachers
+    "kashyap": 1, 
+    "karthic": 2, 
+    "maya": 3, 
+    "divya": 4
 }
 
 class TTSRequest(BaseModel):
