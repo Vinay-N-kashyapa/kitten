@@ -18,13 +18,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "model_nano_int8.onnx"
-# Correct LFS download link
+# FIXED: Renamed to model_nano_final.onnx to bypass the corrupt file on Render's disk
+MODEL_PATH = "model_nano_final.onnx"
+# FIXED: Correct download URL
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
-if not os.path.exists(MODEL_PATH):
+if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
     print("Downloading KittenTTS model...")
-    r = requests.get(MODEL_URL, allow_redirects=True)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
     with open(MODEL_PATH, 'wb') as f:
         f.write(r.content)
     print("Model downloaded successfully.")
