@@ -1,7 +1,6 @@
 import os
 import wave
 import numpy as np
-import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,52 +17,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "model_nano_final.onnx"
-# FIXED: Using correct '=' instead of space in download=true
-MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
+MODEL_PATH = "model_nano_int8.onnx"
 
-def download_model():
-    print("Downloading KittenTTS model...", flush=True)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
-    
-    # Block HTML error pages
-    if b"<!doctype html>" in r.content[:500].lower() or b"<html>" in r.content[:500].lower():
-        raise RuntimeError("Downloaded file is an HTML error page, not a binary model.")
-        
-    with open(MODEL_PATH, 'wb') as f:
-        f.write(r.content)
-    print(f"Model downloaded successfully. Size: {os.path.getsize(MODEL_PATH)} bytes", flush=True)
+if not os.path.exists(MODEL_PATH):
+    raise RuntimeError(f"Error: {MODEL_PATH} not found in the repository folder!")
 
-# Self-healing loader: if it fails to load, delete the file and download fresh!
-try:
-    if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
-        download_model()
-        
-    session_options = ort.SessionOptions()
-    session_options.intra_op_num_threads = 1
-    session_options.inter_op_num_threads = 1
-    session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    
-    session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
-    print("ONNX model loaded successfully.", flush=True)
-except Exception as err:
-    print(f"ONNX load failed: {err}. Deleting corrupt file and retrying...", flush=True)
-    if os.path.exists(MODEL_PATH):
-        os.remove(MODEL_PATH)
-    
-    # Download fresh copy
-    download_model()
-    
-    # Retry loading
-    session_options = ort.SessionOptions()
-    session_options.intra_op_num_threads = 1
-    session_options.inter_op_num_threads = 1
-    session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
-    print("ONNX model loaded successfully on retry.", flush=True)
+# Optimize ONNX memory limit for Render's 512MB RAM free plan
+session_options = ort.SessionOptions()
+session_options.intra_op_num_threads = 1
+session_options.inter_op_num_threads = 1
+session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
+print("ONNX model loaded successfully from local repository folder.", flush=True)
 
 # 🎙️ All 13 distinct voice mappings (2 Mentors + 4 Teachers + 7 Interviewers)
 VOICE_MAP = {
