@@ -18,9 +18,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Renamed to model_nano_final.onnx to force a fresh download
 MODEL_PATH = "model_nano_final.onnx"
-# Correct LFS download link
+# FIXED: Using correct '=' instead of space in download=true
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
 def download_model():
