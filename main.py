@@ -10,6 +10,7 @@ import onnxruntime as ort
 
 app = FastAPI()
 
+# Enable CORS so your Firebase frontend can call this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,9 +19,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Renamed to model_nano_v3.onnx to force a fresh download
+# Renamed to model_nano_v3.onnx to force a fresh download and bypass Render's corrupt build cache
 MODEL_PATH = "model_nano_v3.onnx"
-# FIXED: Using '=' instead of space
+# FIXED: Using '=' instead of space in download=true
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
 if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
@@ -30,7 +31,7 @@ if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
     }
     r = requests.get(MODEL_URL, headers=headers, allow_redirects=True)
     
-    # Safety Check: If the file is HTML, it means Hugging Face blocked us or returned an error page
+    # Safety Check: If the download returned an HTML page (Hugging Face error), block it
     if b"<!doctype html>" in r.content[:500].lower() or b"<html>" in r.content[:500].lower():
         raise RuntimeError("Error: Downloaded an HTML page instead of the model. Check the download URL.")
         
@@ -38,7 +39,7 @@ if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
         f.write(r.content)
     print(f"Model downloaded. Size: {os.path.getsize(MODEL_PATH)} bytes", flush=True)
 
-# Optimize ONNX memory limit for Render's 512MB RAM
+# Optimize ONNX memory limit for Render's 512MB RAM free plan
 session_options = ort.SessionOptions()
 session_options.intra_op_num_threads = 1
 session_options.inter_op_num_threads = 1
