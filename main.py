@@ -6,10 +6,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import onnxruntime as ort
 
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,45 +18,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "kokoro-v1.0.onnx"
-VOICES_PATH = "voices.bin"
+MODEL_PATH = "model_nano_int8.onnx"
+# Added ?download=true to download the actual raw binary bytes
+MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
-# Download Kokoro ONNX model files if not present
 if not os.path.exists(MODEL_PATH):
-    print("Downloading Kokoro-82M model...")
-    r = requests.get("https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx")
-    with open(MODEL_PATH, "wb") as f:
+    print("Downloading KittenTTS model...")
+    r = requests.get(MODEL_URL, allow_redirects=True)
+    with open(MODEL_PATH, 'wb') as f:
         f.write(r.content)
+    print("Model downloaded successfully.")
 
-if not os.path.exists(VOICES_PATH):
-    print("Downloading voices configuration...")
-    r = requests.get("https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices.bin")
-    with open(VOICES_PATH, "wb") as f:
-        f.write(r.content)
+# Optimize ONNX memory limit for Render's 512MB RAM
+session_options = ort.SessionOptions()
+session_options.intra_op_num_threads = 1
+session_options.inter_op_num_threads = 1
+session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
-# Initialize Kokoro ONNX Engine
-from kokoro_onnx import KokoroOnnx
-kokoro = KokoroOnnx(MODEL_PATH, VOICES_PATH)
-print("Kokoro-82M God Mode loaded successfully!")
+session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
+print("ONNX model loaded successfully.")
 
-# Map your interviewers/teachers to natural Studio Voices
 VOICE_MAP = {
-    # Female personas
-    "shalini": "af_sarah",
-    "neha": "af_bella",
-    "sneha": "af_sky",
-    "priya": "bf_emma",
-    "maya": "af_nicole",
-    "divya": "af_sarah",
-    
-    # Male personas
-    "vikram": "am_adam",
-    "aditya": "am_michael",
-    "rajesh": "am_fenrir",
-    "abhijit": "bm_george",
-    "anish": "am_adam",
-    "kashyap": "am_michael",
-    "karthic": "bm_lewis"
+    "vikram": 0, "shalini": 1, "aditya": 2, "neha": 3,
+    "rajesh": 4, "sneha": 5, "abhijit": 6, "priya": 1, "anish": 2
 }
 
 class TTSRequest(BaseModel):
@@ -66,21 +50,32 @@ class TTSRequest(BaseModel):
 @app.post("/api/tts")
 async def text_to_speech(req: TTSRequest):
     try:
-        voice_name = VOICE_MAP.get(req.voice.lower(), "am_adam")
         clean_text = req.text.strip()
+        voice_id = VOICE_MAP.get(req.voice.lower(), 0)
 
-        # Generate audio samples
-        samples, sample_rate = kokoro.create(clean_text, voice=voice_name, speed=1.0, lang="en-us")
+        tokens = [ord(c) for c in clean_text if ord(c) < 256]
+        if not tokens:
+            raise HTTPException(status_code=400, detail="Text has no valid characters")
 
-        # Convert to Int16 WAV PCM
-        audio_array = np.clip(samples, -1.0, 1.0)
+        input_ids = np.array([tokens], dtype=np.int64)
+        voice_tensor = np.array([voice_id], dtype=np.int64)
+
+        results = session.run(None, {
+            "input_ids": input_ids,
+            "voice": voice_tensor
+        })
+
+        audio_data = results[0]
+        audio_array = np.array(audio_data, dtype=np.float32).flatten()
+
+        audio_array = np.clip(audio_array, -1.0, 1.0)
         audio_int16 = (audio_array * 32767).astype(np.int16)
 
         output_file = "/tmp/output.wav" if os.path.exists("/tmp") else "output.wav"
         with wave.open(output_file, "w") as wav_file:
             wav_file.setnchannels(1)
             wav_file.setsampwidth(2)
-            wav_file.setframerate(sample_rate)
+            wav_file.setframerate(24000)
             wav_file.writeframes(audio_int16.tobytes())
 
         return FileResponse(output_file, media_type="audio/wav", filename="speech.wav")
