@@ -18,12 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "model_nano_int8.onnx"
+# Renamed to model_nano_v2.onnx to bypass Render's corrupt build cache
+MODEL_PATH = "model_nano_v2.onnx"
 MODEL_URL = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx?download=true"
 
-# Download the model with browser User-Agent headers
 if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 1000000:
-    print("Downloading KittenTTS model...")
+    print("Downloading KittenTTS model (v2)...")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
