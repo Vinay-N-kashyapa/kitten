@@ -17,7 +17,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = "model_nano_int8.onnx"
+# FIXED: Match the exact name of the file in your GitHub repository
+MODEL_PATH = "kitten_tts_nano_v0_8.onnx"
 
 if not os.path.exists(MODEL_PATH):
     raise RuntimeError(f"Error: {MODEL_PATH} not found in the repository folder!")
