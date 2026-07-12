@@ -1,7 +1,4 @@
 fastapi
 uvicorn
 numpy
-soundfile
-espeakng-loader
-phonemizer
-https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
+onnxruntime
