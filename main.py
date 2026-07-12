@@ -54,8 +54,8 @@ def load_model():
     try:
         from kittentts import KittenTTS
         print("Loading KittenTTS Model...", flush=True)
-        # Use mini model with optimized thread options to fit under 512MB
-        model = KittenTTS("KittenML/kitten-tts-mini-0.8")
+        # Use NANO model (~15MB) instead of MINI (~80MB) to stay well within Render's 512MB RAM budget
+        model = KittenTTS("KittenML/kitten-tts-nano-0.8")
         print("KittenTTS Model loaded successfully!", flush=True)
     except Exception as e:
         print(f"Error loading KittenTTS: {e}", flush=True)
@@ -74,7 +74,7 @@ async def generate_speech(req: TTSRequest):
     if model is None:
         try:
             from kittentts import KittenTTS
-            model = KittenTTS("KittenML/kitten-tts-mini-0.8")
+            model = KittenTTS("KittenML/kitten-tts-nano-0.8")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"TTS Engine is not initialized: {e}")
 
@@ -102,7 +102,7 @@ async def generate_speech(req: TTSRequest):
 
 @app.get("/")
 async def health_check():
-    return {"status": "healthy", "engine": "KittenTTS", "model": "kitten-tts-mini-0.8"}
+    return {"status": "healthy", "engine": "KittenTTS", "model": "kitten-tts-nano-0.8"}
 
 if __name__ == "__main__":
     import uvicorn
