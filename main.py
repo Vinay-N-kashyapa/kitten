@@ -11,7 +11,7 @@ _original_InferenceSession = ort.InferenceSession
 
 def custom_InferenceSession(model_path, *args, **kwargs):
     print(f"Intercepted ONNX session creation for {model_path}. Injecting memory-optimized options.", flush=True)
-    # Configure low-memory session options
+    # Configure low-memory session options (Forces 1 CPU thread & sequential execution to save RAM)
     session_options = ort.SessionOptions()
     session_options.intra_op_num_threads = 1
     session_options.inter_op_num_threads = 1
