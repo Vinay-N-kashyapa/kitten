@@ -1,42 +1,15 @@
 import os
 import io
+import wave
+import numpy as np
+import urllib.request
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import soundfile as sf
 import onnxruntime as ort
 
-# ── Monkey-Patching onnxruntime SessionOptions to prevent Out-Of-Memory (OOM) on Render's 512MB free plan ──
-_original_InferenceSession = ort.InferenceSession
+app = FastAPI()
 
-def custom_InferenceSession(model_path, *args, **kwargs):
-    print(f"Intercepted ONNX session creation for {model_path}. Injecting memory-optimized options.", flush=True)
-    # Configure low-memory session options (Forces 1 CPU thread & sequential execution to save RAM)
-    session_options = ort.SessionOptions()
-    session_options.intra_op_num_threads = 1
-    session_options.inter_op_num_threads = 1
-    session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    
-    # Inject optimized options
-    kwargs['sess_options'] = session_options
-    return _original_InferenceSession(model_path, *args, **kwargs)
-
-ort.InferenceSession = custom_InferenceSession
-
-# ── Monkey-Patching phonemizer for newer python/phonemizer compatibility ──
-try:
-    from phonemizer.backend.espeak.wrapper import EspeakWrapper
-    if not hasattr(EspeakWrapper, 'set_data_path'):
-        print("Applying compatibility patch to EspeakWrapper...", flush=True)
-        EspeakWrapper.set_data_path = lambda path: os.environ.update({"ESPEAK_DATA_PATH": path})
-        print("Patch applied successfully!", flush=True)
-except Exception as e:
-    print(f"Skipping EspeakWrapper compatibility patch: {e}", flush=True)
-
-# Initialize FastAPI App
-app = FastAPI(title="KittenTTS Microservice")
-
-# Enable CORS so the web app can communicate with the server
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,67 +18,90 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize KittenTTS Model at startup
-model = None
+# Download the lightweight v0.7 Nano model if not present locally (only ~24MB)
+MODEL_PATH = "model_nano_int8.onnx"
+if not os.path.exists(MODEL_PATH):
+    print("Downloading lightweight nano model...", flush=True)
+    url = "https://huggingface.co/KittenML/KittenTTS/resolve/main/model_nano_int8.onnx"
+    urllib.request.urlretrieve(url, MODEL_PATH)
+    print("Download completed!", flush=True)
 
-@app.on_event("startup")
-def load_model():
-    global model
-    try:
-        from kittentts import KittenTTS
-        print("Loading KittenTTS Model...", flush=True)
-        # Use NANO model (~15MB) instead of MINI (~80MB) to stay well within Render's 512MB RAM budget
-        model = KittenTTS("KittenML/kitten-tts-nano-0.8")
-        print("KittenTTS Model loaded successfully!", flush=True)
-    except Exception as e:
-        print(f"Error loading KittenTTS: {e}", flush=True)
-        model = None
+# Optimize memory limit for Render's 512MB RAM free plan
+session_options = ort.SessionOptions()
+session_options.intra_op_num_threads = 1
+session_options.inter_op_num_threads = 1
+session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+
+session = ort.InferenceSession(MODEL_PATH, session_options, providers=['CPUExecutionProvider'])
+print("ONNX model loaded successfully!", flush=True)
+
+# Voice mapping matching your frontend KITTEN_VOICE_MAP
+# Voices: 0=Bella, 1=Jasper, 2=Luna, 3=Bruno, 4=Rosie, 5=Hugo, 6=Kiki, 7=Leo
+VOICE_MAP = {
+    # 7 Interviewers
+    "vikram": 3, 
+    "shalini": 2, 
+    "aditya": 5, 
+    "neha": 6, 
+    "rajesh": 7, 
+    "sneha": 0, 
+    "abhijit": 1, 
+    
+    # 2 Mentors
+    "priya": 0, 
+    "anish": 5, 
+    
+    # 4 Teachers
+    "kashyap": 1, 
+    "karthic": 3, 
+    "maya": 2, 
+    "divya": 4
+}
 
 class TTSRequest(BaseModel):
     text: str
-    voice: str = "Rosie"
-    vibe: str = "neutral"
-    speed: float = 1.0
+    voice: str
 
 @app.post("/api/tts")
 @app.post("/tts")
-async def generate_speech(req: TTSRequest):
-    global model
-    if model is None:
-        try:
-            from kittentts import KittenTTS
-            model = KittenTTS("KittenML/kitten-tts-nano-0.8")
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"TTS Engine is not initialized: {e}")
-
+async def text_to_speech(req: TTSRequest):
     try:
-        # KittenTTS supports: 'Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo'
-        # Map voice name to proper casing just in case
-        voice_map = {v.lower(): v for v in ['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']}
-        selected_voice = voice_map.get(req.voice.lower(), "Rosie")
+        clean_text = req.text.strip()
+        voice_id = VOICE_MAP.get(req.voice.lower(), 0)
 
-        print(f"Generating speech for text: '{req.text[:30]}...' with voice: {selected_voice}", flush=True)
-        
-        # Generate raw audio array using the kittentts package
-        audio = model.generate(req.text, voice=selected_voice, speed=req.speed)
-        
-        # Write numpy float array to WAV byte buffer
+        # Simple char to token mapping (no phonemizer required for this model!)
+        tokens = [ord(c) for c in clean_text if ord(c) < 256]
+        if not tokens:
+            raise HTTPException(status_code=400, detail="Text has no valid characters")
+
+        input_ids = np.array([tokens], dtype=np.int64)
+        voice_tensor = np.array([voice_id], dtype=np.int64)
+
+        results = session.run(None, {
+            "input_ids": input_ids,
+            "voice": voice_tensor
+        })
+
+        audio_data = results[0]
+        audio_array = np.array(audio_data, dtype=np.float32).flatten()
+
+        # Convert float audio to int16 WAV
+        audio_array = np.clip(audio_array, -1.0, 1.0)
+        audio_int16 = (audio_array * 32767).astype(np.int16)
+
         wav_io = io.BytesIO()
-        sf.write(wav_io, audio, 24000, format='WAV', subtype='PCM_16')
-        wav_io.seek(0)
+        with wave.open(wav_io, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(24000)
+            wav_file.writeframes(audio_int16.tobytes())
         
+        wav_io.seek(0)
         return Response(content=wav_io.read(), media_type="audio/wav")
 
     except Exception as e:
-        print(f"Inference error: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
-async def health_check():
-    return {"status": "healthy", "engine": "KittenTTS", "model": "kitten-tts-nano-0.8"}
-
-if __name__ == "__main__":
-    import uvicorn
-    # Render binds to PORT env variable automatically
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+async def health():
+    return {"status": "healthy"}
