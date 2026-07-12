@@ -4,16 +4,34 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import soundfile as sf
+import onnxruntime as ort
+
+# ── Monkey-Patching onnxruntime SessionOptions to prevent Out-Of-Memory (OOM) on Render's 512MB free plan ──
+_original_InferenceSession = ort.InferenceSession
+
+def custom_InferenceSession(model_path, *args, **kwargs):
+    print(f"Intercepted ONNX session creation for {model_path}. Injecting memory-optimized options.", flush=True)
+    # Configure low-memory session options
+    session_options = ort.SessionOptions()
+    session_options.intra_op_num_threads = 1
+    session_options.inter_op_num_threads = 1
+    session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    
+    # Inject optimized options
+    kwargs['sess_options'] = session_options
+    return _original_InferenceSession(model_path, *args, **kwargs)
+
+ort.InferenceSession = custom_InferenceSession
 
 # ── Monkey-Patching phonemizer for newer python/phonemizer compatibility ──
 try:
     from phonemizer.backend.espeak.wrapper import EspeakWrapper
     if not hasattr(EspeakWrapper, 'set_data_path'):
-        print("Applying compatibility patch to EspeakWrapper...")
+        print("Applying compatibility patch to EspeakWrapper...", flush=True)
         EspeakWrapper.set_data_path = lambda path: os.environ.update({"ESPEAK_DATA_PATH": path})
-        print("Patch applied successfully!")
+        print("Patch applied successfully!", flush=True)
 except Exception as e:
-    print(f"Skipping EspeakWrapper compatibility patch: {e}")
+    print(f"Skipping EspeakWrapper compatibility patch: {e}", flush=True)
 
 # Initialize FastAPI App
 app = FastAPI(title="KittenTTS Microservice")
@@ -35,12 +53,12 @@ def load_model():
     global model
     try:
         from kittentts import KittenTTS
-        print("Loading KittenTTS Model...")
-        # Use the official lightweight Mini model
+        print("Loading KittenTTS Model...", flush=True)
+        # Use mini model with optimized thread options to fit under 512MB
         model = KittenTTS("KittenML/kitten-tts-mini-0.8")
-        print("KittenTTS Model loaded successfully!")
+        print("KittenTTS Model loaded successfully!", flush=True)
     except Exception as e:
-        print(f"Error loading KittenTTS: {e}")
+        print(f"Error loading KittenTTS: {e}", flush=True)
         model = None
 
 class TTSRequest(BaseModel):
@@ -66,7 +84,7 @@ async def generate_speech(req: TTSRequest):
         voice_map = {v.lower(): v for v in ['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']}
         selected_voice = voice_map.get(req.voice.lower(), "Rosie")
 
-        print(f"Generating speech for text: '{req.text[:30]}...' with voice: {selected_voice}")
+        print(f"Generating speech for text: '{req.text[:30]}...' with voice: {selected_voice}", flush=True)
         
         # Generate raw audio array using the kittentts package
         audio = model.generate(req.text, voice=selected_voice, speed=req.speed)
@@ -79,7 +97,7 @@ async def generate_speech(req: TTSRequest):
         return Response(content=wav_io.read(), media_type="audio/wav")
 
     except Exception as e:
-        print(f"Inference error: {e}")
+        print(f"Inference error: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
